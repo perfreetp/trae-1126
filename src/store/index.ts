@@ -59,6 +59,8 @@ interface AppState {
   updateMaintenancePlan: (id: string, updates: Partial<MaintenancePlan>) => void;
   addEquipmentTransfer: (transfer: Omit<EquipmentTransfer, 'id'>) => void;
   addSparePartRequest: (request: Omit<SparePartRequest, 'id'>) => void;
+  addEquipment: (equipment: Omit<Equipment, 'id'>) => void;
+  addMaintenancePlan: (plan: Omit<MaintenancePlan, 'id'>) => void;
   getEquipmentById: (id: string) => Equipment | undefined;
   getEquipmentNameById: (id: string) => string;
 }
@@ -130,6 +132,14 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   addSparePartRequest: (request) => set((state) => ({
     sparePartRequests: [...state.sparePartRequests, { ...request, id: generateId() }],
+  })),
+
+  addEquipment: (equipment) => set((state) => ({
+    equipments: [...state.equipments, { ...equipment, id: generateId() }],
+  })),
+
+  addMaintenancePlan: (plan) => set((state) => ({
+    maintenancePlans: [...state.maintenancePlans, { ...plan, id: generateId() }],
   })),
 
   getEquipmentById: (id) => get().equipments.find((e) => e.id === id),

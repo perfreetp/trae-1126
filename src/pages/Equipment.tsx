@@ -4,22 +4,59 @@ import {
   Filter,
   Plus,
   Edit,
-  Trash2,
   Eye,
   ArrowLeftRight,
   X,
+  Save,
 } from 'lucide-react';
 import { useAppStore } from '../store';
 import { StatusBadge } from '../components/StatusBadge';
-import { EquipmentTypeLabels, type EquipmentType, type Equipment } from '../types';
+import { EquipmentTypeLabels, type EquipmentType, type Equipment, type EquipmentStatus } from '../types';
 
 export default function Equipment() {
-  const { equipments, equipmentTransfers, addEquipmentTransfer, getEquipmentById } = useAppStore();
+  const { equipments, equipmentTransfers, addEquipmentTransfer, addEquipment, getEquipmentById } = useAppStore();
   const [searchTerm, setSearchTerm] = useState('');
   const [typeFilter, setTypeFilter] = useState<EquipmentType | 'all'>('all');
   const [showDetail, setShowDetail] = useState<Equipment | null>(null);
   const [showTransfer, setShowTransfer] = useState<Equipment | null>(null);
+  const [showAddModal, setShowAddModal] = useState(false);
   const [transferForm, setTransferForm] = useState({ toBerth: '', reason: '' });
+  const [newEquipment, setNewEquipment] = useState({
+    name: '',
+    type: 'quay-crane' as EquipmentType,
+    model: '',
+    berth: '',
+    purchaseDate: new Date().toISOString().split('T')[0],
+    totalHours: '',
+    status: 'running' as EquipmentStatus,
+    location: '',
+  });
+
+  const handleAddEquipment = () => {
+    if (!newEquipment.name || !newEquipment.model || !newEquipment.berth) return;
+    addEquipment({
+      name: newEquipment.name,
+      type: newEquipment.type,
+      model: newEquipment.model,
+      berth: newEquipment.berth,
+      status: newEquipment.status,
+      totalHours: parseFloat(newEquipment.totalHours) || 0,
+      purchaseDate: newEquipment.purchaseDate,
+      location: newEquipment.location || newEquipment.berth,
+      specs: {},
+    });
+    setShowAddModal(false);
+    setNewEquipment({
+      name: '',
+      type: 'quay-crane',
+      model: '',
+      berth: '',
+      purchaseDate: new Date().toISOString().split('T')[0],
+      totalHours: '',
+      status: 'running',
+      location: '',
+    });
+  };
 
   const filteredEquipments = equipments.filter(eq => {
     const matchSearch = eq.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -51,7 +88,10 @@ export default function Equipment() {
           <h1 className="text-2xl font-bold text-industrial-800">设备台账</h1>
           <p className="text-sm text-industrial-500 mt-1">管理所有装卸设备的基础信息</p>
         </div>
-        <button className="btn-primary flex items-center gap-2">
+        <button
+          onClick={() => setShowAddModal(true)}
+          className="btn-primary flex items-center gap-2"
+        >
           <Plus className="w-4 h-4" />
           新增设备
         </button>
@@ -310,6 +350,128 @@ export default function Equipment() {
                 disabled={!transferForm.toBerth || !transferForm.reason}
               >
                 提交申请
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showAddModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-industrial shadow-xl w-full max-w-lg max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between p-6 border-b border-industrial-100">
+              <h3 className="text-lg font-semibold text-industrial-800">新增设备</h3>
+              <button
+                onClick={() => setShowAddModal(false)}
+                className="p-1 hover:bg-industrial-100 rounded transition-colors"
+              >
+                <X className="w-5 h-5 text-industrial-500" />
+              </button>
+            </div>
+            <div className="p-6 space-y-4">
+              <div>
+                <label className="form-label">设备名称</label>
+                <input
+                  type="text"
+                  className="input-field"
+                  placeholder="例如：岸桥05"
+                  value={newEquipment.name}
+                  onChange={(e) => setNewEquipment(prev => ({ ...prev, name: e.target.value }))}
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="form-label">设备类型</label>
+                  <select
+                    className="input-field"
+                    value={newEquipment.type}
+                    onChange={(e) => setNewEquipment(prev => ({ ...prev, type: e.target.value as EquipmentType }))}
+                  >
+                    {Object.entries(EquipmentTypeLabels).map(([value, label]) => (
+                      <option key={value} value={value}>{label}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="form-label">设备状态</label>
+                  <select
+                    className="input-field"
+                    value={newEquipment.status}
+                    onChange={(e) => setNewEquipment(prev => ({ ...prev, status: e.target.value as EquipmentStatus }))}
+                  >
+                    <option value="running">运行中</option>
+                    <option value="stopped">停机</option>
+                    <option value="maintenance">维修中</option>
+                  </select>
+                </div>
+              </div>
+              <div>
+                <label className="form-label">型号</label>
+                <input
+                  type="text"
+                  className="input-field"
+                  placeholder="例如：ZPMC-3001"
+                  value={newEquipment.model}
+                  onChange={(e) => setNewEquipment(prev => ({ ...prev, model: e.target.value }))}
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="form-label">所在泊位</label>
+                  <select
+                    className="input-field"
+                    value={newEquipment.berth}
+                    onChange={(e) => setNewEquipment(prev => ({ ...prev, berth: e.target.value }))}
+                  >
+                    <option value="">请选择</option>
+                    {['1号泊位', '2号泊位', '3号泊位', '4号泊位', '堆场A1', '堆场A2', '堆场B1', '堆场B2', '全场区'].map(b => (
+                      <option key={b} value={b}>{b}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="form-label">购置日期</label>
+                  <input
+                    type="date"
+                    className="input-field"
+                    value={newEquipment.purchaseDate}
+                    onChange={(e) => setNewEquipment(prev => ({ ...prev, purchaseDate: e.target.value }))}
+                  />
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="form-label">初始运行小时</label>
+                  <input
+                    type="number"
+                    min="0"
+                    className="input-field"
+                    placeholder="例如：0"
+                    value={newEquipment.totalHours}
+                    onChange={(e) => setNewEquipment(prev => ({ ...prev, totalHours: e.target.value }))}
+                  />
+                </div>
+                <div>
+                  <label className="form-label">所在区域 (选填)</label>
+                  <input
+                    type="text"
+                    className="input-field"
+                    placeholder="例如：A区"
+                    value={newEquipment.location}
+                    onChange={(e) => setNewEquipment(prev => ({ ...prev, location: e.target.value }))}
+                  />
+                </div>
+              </div>
+            </div>
+            <div className="flex justify-end gap-3 p-6 border-t border-industrial-100">
+              <button onClick={() => setShowAddModal(false)} className="btn-secondary">取消</button>
+              <button
+                onClick={handleAddEquipment}
+                className="btn-primary flex items-center gap-2"
+                disabled={!newEquipment.name || !newEquipment.model || !newEquipment.berth}
+              >
+                <Save className="w-4 h-4" />
+                保存
               </button>
             </div>
           </div>

@@ -8,9 +8,10 @@ import {
   Clock,
   AlertTriangle,
   CheckCircle,
-  ExternalLink,
   X,
   Edit3,
+  Save,
+  UserCheck,
 } from 'lucide-react';
 import { useAppStore } from '../store';
 import { StatCard } from '../components/StatCard';
@@ -23,12 +24,25 @@ export default function Maintenance() {
   const [levelFilter, setLevelFilter] = useState<FaultLevel | 'all'>('all');
   const [showAddModal, setShowAddModal] = useState(false);
   const [showDetailModal, setShowDetailModal] = useState<FaultOrder | null>(null);
+  const [showAssignModal, setShowAssignModal] = useState<FaultOrder | null>(null);
+  const [showCompleteModal, setShowCompleteModal] = useState<FaultOrder | null>(null);
   const [newFault, setNewFault] = useState({
     equipmentId: '',
     title: '',
     description: '',
     level: 'normal' as FaultLevel,
     reporter: '',
+    repairType: 'internal' as 'internal' | 'external',
+  });
+  const [assignForm, setAssignForm] = useState({
+    assignee: '',
+    repairType: 'internal' as 'internal' | 'external',
+    externalVendor: '',
+  });
+  const [completeForm, setCompleteForm] = useState({
+    downtime: '',
+    cost: '',
+    accidentRelated: '',
   });
 
   const stats = useMemo(() => {
@@ -54,17 +68,43 @@ export default function Maintenance() {
       ...newFault,
       status: 'pending',
       reportTime: new Date().toISOString().replace('T', ' ').slice(0, 19),
-      repairType: 'internal',
     });
     setShowAddModal(false);
-    setNewFault({ equipmentId: '', title: '', description: '', level: 'normal', reporter: '' });
+    setNewFault({ equipmentId: '', title: '', description: '', level: 'normal', reporter: '', repairType: 'internal' });
   };
 
-  const handleUpdateStatus = (id: string, status: FaultStatus) => {
-    updateFaultOrder(id, { status });
-    if (showDetailModal?.id === id) {
-      setShowDetailModal({ ...showDetailModal, status });
+  const handleAssign = () => {
+    if (!showAssignModal || !assignForm.assignee) return;
+    const updates: Partial<FaultOrder> = {
+      assignee: assignForm.assignee,
+      repairType: assignForm.repairType,
+      status: 'processing',
+    };
+    if (assignForm.repairType === 'external' && assignForm.externalVendor) {
+      updates.externalVendor = assignForm.externalVendor;
     }
+    updateFaultOrder(showAssignModal.id, updates);
+    setShowAssignModal(null);
+    setAssignForm({ assignee: '', repairType: 'internal', externalVendor: '' });
+  };
+
+  const handleComplete = () => {
+    if (!showCompleteModal) return;
+    const updates: Partial<FaultOrder> = {
+      status: 'completed',
+    };
+    if (completeForm.downtime) {
+      updates.downtime = parseFloat(completeForm.downtime);
+    }
+    if (completeForm.cost) {
+      updates.cost = parseFloat(completeForm.cost);
+    }
+    if (completeForm.accidentRelated) {
+      updates.accidentRelated = completeForm.accidentRelated;
+    }
+    updateFaultOrder(showCompleteModal.id, updates);
+    setShowCompleteModal(null);
+    setCompleteForm({ downtime: '', cost: '', accidentRelated: '' });
   };
 
   return (
@@ -164,8 +204,8 @@ export default function Maintenance() {
                 <th>级别</th>
                 <th>状态</th>
                 <th>报告人</th>
-                <th>报告时间</th>
                 <th>处理人</th>
+                <th>维修类型</th>
                 <th>停机时间</th>
                 <th>操作</th>
               </tr>
@@ -183,7 +223,6 @@ export default function Maintenance() {
                     <StatusBadge status={fault.status} type="fault-status" />
                   </td>
                   <td>{fault.reporter}</td>
-                  <td className="text-industrial-600">{fault.reportTime}</td>
                   <td>
                     {fault.assignee ? (
                       <span className="flex items-center gap-1 text-sm">
@@ -194,17 +233,47 @@ export default function Maintenance() {
                       <span className="text-industrial-400 text-sm">未指派</span>
                     )}
                   </td>
+                  <td>
+                    {fault.repairType === 'internal' ? '内部维修' : '外协维修'}
+                  </td>
                   <td>{fault.downtime ? `${fault.downtime}h` : '-'}</td>
                   <td>
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setShowDetailModal(fault);
-                      }}
-                      className="p-1.5 text-primary-600 hover:bg-primary-50 rounded transition-colors"
-                    >
-                      <Edit3 className="w-4 h-4" />
-                    </button>
+                    <div className="flex items-center gap-1">
+                      {fault.status === 'pending' && (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setShowAssignModal(fault);
+                          }}
+                          className="p-1.5 text-accent-teal hover:bg-accent-teal/10 rounded transition-colors"
+                          title="派单"
+                        >
+                          <UserCheck className="w-4 h-4" />
+                        </button>
+                      )}
+                      {fault.status === 'processing' && (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setShowCompleteModal(fault);
+                          }}
+                          className="p-1.5 text-accent-teal hover:bg-accent-teal/10 rounded transition-colors"
+                          title="完成维修"
+                        >
+                          <CheckCircle className="w-4 h-4" />
+                        </button>
+                      )}
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setShowDetailModal(fault);
+                        }}
+                        className="p-1.5 text-primary-600 hover:bg-primary-50 rounded transition-colors"
+                        title="查看详情"
+                      >
+                        <Edit3 className="w-4 h-4" />
+                      </button>
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -215,7 +284,7 @@ export default function Maintenance() {
 
       {showAddModal && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-industrial shadow-xl w-full max-w-lg">
+          <div className="bg-white rounded-industrial shadow-xl w-full max-w-lg max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between p-6 border-b border-industrial-100">
               <h3 className="text-lg font-semibold text-industrial-800">新增故障工单</h3>
               <button
@@ -249,17 +318,30 @@ export default function Maintenance() {
                   onChange={(e) => setNewFault(prev => ({ ...prev, title: e.target.value }))}
                 />
               </div>
-              <div>
-                <label className="form-label">故障级别</label>
-                <select
-                  className="input-field"
-                  value={newFault.level}
-                  onChange={(e) => setNewFault(prev => ({ ...prev, level: e.target.value as FaultLevel }))}
-                >
-                  {Object.entries(FaultLevelLabels).map(([value, label]) => (
-                    <option key={value} value={value}>{label}</option>
-                  ))}
-                </select>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="form-label">故障级别</label>
+                  <select
+                    className="input-field"
+                    value={newFault.level}
+                    onChange={(e) => setNewFault(prev => ({ ...prev, level: e.target.value as FaultLevel }))}
+                  >
+                    {Object.entries(FaultLevelLabels).map(([value, label]) => (
+                      <option key={value} value={value}>{label}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="form-label">维修类型</label>
+                  <select
+                    className="input-field"
+                    value={newFault.repairType}
+                    onChange={(e) => setNewFault(prev => ({ ...prev, repairType: e.target.value as 'internal' | 'external' }))}
+                  >
+                    <option value="internal">内部维修</option>
+                    <option value="external">外协维修</option>
+                  </select>
+                </div>
               </div>
               <div>
                 <label className="form-label">故障详情</label>
@@ -282,18 +364,169 @@ export default function Maintenance() {
               </div>
             </div>
             <div className="flex justify-end gap-3 p-6 border-t border-industrial-100">
-              <button
-                onClick={() => setShowAddModal(false)}
-                className="btn-secondary"
-              >
-                取消
-              </button>
+              <button onClick={() => setShowAddModal(false)} className="btn-secondary">取消</button>
               <button
                 onClick={handleAddFault}
                 className="btn-primary"
                 disabled={!newFault.equipmentId || !newFault.title || !newFault.description || !newFault.reporter}
               >
                 提交工单
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showAssignModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-industrial shadow-xl w-full max-w-md">
+            <div className="flex items-center justify-between p-6 border-b border-industrial-100">
+              <h3 className="text-lg font-semibold text-industrial-800">维修派单</h3>
+              <button
+                onClick={() => setShowAssignModal(null)}
+                className="p-1 hover:bg-industrial-100 rounded transition-colors"
+              >
+                <X className="w-5 h-5 text-industrial-500" />
+              </button>
+            </div>
+            <div className="p-6 space-y-4">
+              <div className="p-3 bg-primary-50 rounded-industrial">
+                <p className="text-sm text-primary-700">
+                  <span className="font-medium">{showAssignModal.title}</span>
+                  <span className="mx-2">·</span>
+                  {getEquipmentNameById(showAssignModal.equipmentId)}
+                </p>
+              </div>
+              <div>
+                <label className="form-label">处理人</label>
+                <select
+                  className="input-field"
+                  value={assignForm.assignee}
+                  onChange={(e) => setAssignForm(prev => ({ ...prev, assignee: e.target.value }))}
+                >
+                  <option value="">请选择处理人</option>
+                  <option value="张工">张工（机械）</option>
+                  <option value="李工">李工（电气）</option>
+                  <option value="王工">王工（液压）</option>
+                  <option value="赵工">赵工（综合）</option>
+                </select>
+              </div>
+              <div>
+                <label className="form-label">维修类型</label>
+                <div className="flex gap-3">
+                  {(['internal', 'external'] as const).map(type => (
+                    <label key={type} className="flex-1">
+                      <input
+                        type="radio"
+                        name="repairType"
+                        value={type}
+                        checked={assignForm.repairType === type}
+                        onChange={(e) => setAssignForm(prev => ({ ...prev, repairType: e.target.value as 'internal' | 'external' }))}
+                        className="sr-only"
+                      />
+                      <div className={`p-3 rounded-industrial border-2 cursor-pointer transition-all text-center ${
+                        assignForm.repairType === type
+                          ? 'border-primary-900 bg-primary-50 text-primary-900'
+                          : 'border-industrial-200 hover:border-primary-300'
+                      }`}>
+                        {type === 'internal' ? '内部维修' : '外协维修'}
+                      </div>
+                    </label>
+                  ))}
+                </div>
+              </div>
+              {assignForm.repairType === 'external' && (
+                <div>
+                  <label className="form-label">外协单位</label>
+                  <input
+                    type="text"
+                    className="input-field"
+                    placeholder="请输入外协单位名称"
+                    value={assignForm.externalVendor}
+                    onChange={(e) => setAssignForm(prev => ({ ...prev, externalVendor: e.target.value }))}
+                  />
+                </div>
+              )}
+            </div>
+            <div className="flex justify-end gap-3 p-6 border-t border-industrial-100">
+              <button onClick={() => setShowAssignModal(null)} className="btn-secondary">取消</button>
+              <button
+                onClick={handleAssign}
+                className="btn-primary flex items-center gap-2"
+                disabled={!assignForm.assignee}
+              >
+                <Save className="w-4 h-4" />
+                确认派单
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showCompleteModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-industrial shadow-xl w-full max-w-md">
+            <div className="flex items-center justify-between p-6 border-b border-industrial-100">
+              <h3 className="text-lg font-semibold text-industrial-800">完成维修</h3>
+              <button
+                onClick={() => setShowCompleteModal(null)}
+                className="p-1 hover:bg-industrial-100 rounded transition-colors"
+              >
+                <X className="w-5 h-5 text-industrial-500" />
+              </button>
+            </div>
+            <div className="p-6 space-y-4">
+              <div className="p-3 bg-accent-teal/10 rounded-industrial">
+                <p className="text-sm text-accent-teal">
+                  <span className="font-medium">{showCompleteModal.title}</span>
+                  <span className="mx-2">·</span>
+                  处理人：{showCompleteModal.assignee}
+                </p>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="form-label">停机小时</label>
+                  <input
+                    type="number"
+                    step="0.5"
+                    min="0"
+                    className="input-field"
+                    placeholder="例如：4.5"
+                    value={completeForm.downtime}
+                    onChange={(e) => setCompleteForm(prev => ({ ...prev, downtime: e.target.value }))}
+                  />
+                </div>
+                <div>
+                  <label className="form-label">维修成本 (元)</label>
+                  <input
+                    type="number"
+                    min="0"
+                    className="input-field"
+                    placeholder="例如：1500"
+                    value={completeForm.cost}
+                    onChange={(e) => setCompleteForm(prev => ({ ...prev, cost: e.target.value }))}
+                  />
+                </div>
+              </div>
+              <div>
+                <label className="form-label">关联事故 (选填)</label>
+                <input
+                  type="text"
+                  className="input-field"
+                  placeholder="如有，请输入事故编号或说明"
+                  value={completeForm.accidentRelated}
+                  onChange={(e) => setCompleteForm(prev => ({ ...prev, accidentRelated: e.target.value }))}
+                />
+              </div>
+            </div>
+            <div className="flex justify-end gap-3 p-6 border-t border-industrial-100">
+              <button onClick={() => setShowCompleteModal(null)} className="btn-secondary">取消</button>
+              <button
+                onClick={handleComplete}
+                className="btn-primary flex items-center gap-2"
+              >
+                <CheckCircle className="w-4 h-4" />
+                确认完成
               </button>
             </div>
           </div>
@@ -389,27 +622,28 @@ export default function Maintenance() {
               <div className="flex gap-2">
                 {showDetailModal.status === 'pending' && (
                   <button
-                    onClick={() => handleUpdateStatus(showDetailModal.id, 'processing')}
+                    onClick={() => {
+                      setShowDetailModal(null);
+                      setShowAssignModal(showDetailModal);
+                    }}
                     className="btn-primary"
                   >
-                    开始处理
+                    派单处理
                   </button>
                 )}
                 {showDetailModal.status === 'processing' && (
                   <button
-                    onClick={() => handleUpdateStatus(showDetailModal.id, 'completed')}
+                    onClick={() => {
+                      setShowDetailModal(null);
+                      setShowCompleteModal(showDetailModal);
+                    }}
                     className="btn-primary"
                   >
                     完成维修
                   </button>
                 )}
               </div>
-              <button
-                onClick={() => setShowDetailModal(null)}
-                className="btn-secondary"
-              >
-                关闭
-              </button>
+              <button onClick={() => setShowDetailModal(null)} className="btn-secondary">关闭</button>
             </div>
           </div>
         </div>

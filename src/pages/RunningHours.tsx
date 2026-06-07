@@ -5,6 +5,8 @@ import {
   Calendar,
   BarChart3,
   Search,
+  Plus,
+  X,
 } from 'lucide-react';
 import {
   BarChart,
@@ -19,12 +21,42 @@ import {
 } from 'recharts';
 import { useAppStore } from '../store';
 import { StatCard } from '../components/StatCard';
-import { EquipmentTypeLabels, ShiftTypeLabels } from '../types';
+import { EquipmentTypeLabels, ShiftTypeLabels, type ShiftType } from '../types';
 
 export default function RunningHours() {
-  const { equipments, runningRecords, getEquipmentNameById } = useAppStore();
+  const { equipments, runningRecords, addRunningRecord, getEquipmentNameById } = useAppStore();
   const [equipmentFilter, setEquipmentFilter] = useState('all');
   const [timeRange, setTimeRange] = useState<'day' | 'week' | 'month'>('week');
+  const [showAddModal, setShowAddModal] = useState(false);
+  const [newRecord, setNewRecord] = useState({
+    equipmentId: '',
+    date: new Date().toISOString().split('T')[0],
+    shift: 'day' as ShiftType,
+    driver: '',
+    hours: '',
+    volume: '',
+  });
+
+  const handleSubmit = () => {
+    if (!newRecord.equipmentId || !newRecord.driver || !newRecord.hours || !newRecord.volume) return;
+    addRunningRecord({
+      equipmentId: newRecord.equipmentId,
+      date: newRecord.date,
+      shift: newRecord.shift,
+      driver: newRecord.driver,
+      hours: parseFloat(newRecord.hours),
+      volume: parseInt(newRecord.volume),
+    });
+    setShowAddModal(false);
+    setNewRecord({
+      equipmentId: '',
+      date: new Date().toISOString().split('T')[0],
+      shift: 'day',
+      driver: '',
+      hours: '',
+      volume: '',
+    });
+  };
 
   const totalHours = useMemo(() => {
     return runningRecords.reduce((sum, r) => sum + r.hours, 0);
@@ -98,6 +130,13 @@ export default function RunningHours() {
               </button>
             ))}
           </div>
+          <button
+            onClick={() => setShowAddModal(true)}
+            className="btn-primary flex items-center gap-2"
+          >
+            <Plus className="w-4 h-4" />
+            录入班次
+          </button>
         </div>
       </div>
 
@@ -250,6 +289,117 @@ export default function RunningHours() {
           </table>
         </div>
       </div>
+
+      {showAddModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-industrial shadow-xl w-full max-w-md">
+            <div className="flex items-center justify-between p-6 border-b border-industrial-100">
+              <h3 className="text-lg font-semibold text-industrial-800">录入作业班次</h3>
+              <button
+                onClick={() => setShowAddModal(false)}
+                className="p-1 hover:bg-industrial-100 rounded transition-colors"
+              >
+                <X className="w-5 h-5 text-industrial-500" />
+              </button>
+            </div>
+            <div className="p-6 space-y-4">
+              <div>
+                <label className="form-label">设备</label>
+                <select
+                  className="input-field"
+                  value={newRecord.equipmentId}
+                  onChange={(e) => setNewRecord(prev => ({ ...prev, equipmentId: e.target.value }))}
+                >
+                  <option value="">请选择设备</option>
+                  {equipments.map(eq => (
+                    <option key={eq.id} value={eq.id}>{eq.name}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="form-label">日期</label>
+                <input
+                  type="date"
+                  className="input-field"
+                  value={newRecord.date}
+                  onChange={(e) => setNewRecord(prev => ({ ...prev, date: e.target.value }))}
+                />
+              </div>
+              <div>
+                <label className="form-label">班次</label>
+                <div className="flex gap-3">
+                  {(['day', 'night'] as const).map(shift => (
+                    <label key={shift} className="flex-1">
+                      <input
+                        type="radio"
+                        name="shift"
+                        value={shift}
+                        checked={newRecord.shift === shift}
+                        onChange={(e) => setNewRecord(prev => ({ ...prev, shift: e.target.value as ShiftType }))}
+                        className="sr-only"
+                      />
+                      <div className={`p-3 rounded-industrial border-2 cursor-pointer transition-all text-center ${
+                        newRecord.shift === shift
+                          ? shift === 'day'
+                            ? 'border-amber-500 bg-amber-50 text-amber-700'
+                            : 'border-indigo-500 bg-indigo-50 text-indigo-700'
+                          : 'border-industrial-200 hover:border-primary-300'
+                      }`}>
+                        {ShiftTypeLabels[shift]}
+                      </div>
+                    </label>
+                  ))}
+                </div>
+              </div>
+              <div>
+                <label className="form-label">当班司机</label>
+                <input
+                  type="text"
+                  className="input-field"
+                  placeholder="司机姓名"
+                  value={newRecord.driver}
+                  onChange={(e) => setNewRecord(prev => ({ ...prev, driver: e.target.value }))}
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="form-label">运行小时</label>
+                  <input
+                    type="number"
+                    step="0.5"
+                    min="0"
+                    className="input-field"
+                    placeholder="8.0"
+                    value={newRecord.hours}
+                    onChange={(e) => setNewRecord(prev => ({ ...prev, hours: e.target.value }))}
+                  />
+                </div>
+                <div>
+                  <label className="form-label">作业量 (TEU)</label>
+                  <input
+                    type="number"
+                    min="0"
+                    className="input-field"
+                    placeholder="120"
+                    value={newRecord.volume}
+                    onChange={(e) => setNewRecord(prev => ({ ...prev, volume: e.target.value }))}
+                  />
+                </div>
+              </div>
+            </div>
+            <div className="flex justify-end gap-3 p-6 border-t border-industrial-100">
+              <button onClick={() => setShowAddModal(false)} className="btn-secondary">取消</button>
+              <button
+                onClick={handleSubmit}
+                className="btn-primary"
+                disabled={!newRecord.equipmentId || !newRecord.driver || !newRecord.hours || !newRecord.volume}
+              >
+                保存
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

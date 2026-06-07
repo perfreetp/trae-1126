@@ -10,18 +10,64 @@ import {
   ShieldCheck,
   X,
   Check,
+  Save,
 } from 'lucide-react';
 import { useAppStore } from '../store';
 import { StatCard } from '../components/StatCard';
 import { StatusBadge } from '../components/StatusBadge';
-import { MaintenanceTypeLabels, type MaintenancePlan, type MaintenanceStatus } from '../types';
+import { MaintenanceTypeLabels, type MaintenancePlan, type MaintenanceStatus, type MaintenanceType } from '../types';
+
+const defaultMaintenanceItems: Record<MaintenanceType, string[]> = {
+  'level1': ['设备外观清洁', '紧固件检查', '润滑油位检查', '安全装置检查'],
+  'level2': ['一级保养全部项目', '液压系统检查', '电气系统检测', '制动器调整'],
+  'level3': ['二级保养全部项目', '整机性能检测', '易损件更换', '结构件探伤'],
+};
 
 export default function Upkeep() {
-  const { maintenancePlans, safetyCheckItems, equipments, getEquipmentNameById, updateMaintenancePlan } = useAppStore();
+  const { maintenancePlans, safetyCheckItems, equipments, getEquipmentNameById, updateMaintenancePlan, addMaintenancePlan } = useAppStore();
   const [statusFilter, setStatusFilter] = useState<MaintenanceStatus | 'all'>('all');
   const [showDetail, setShowDetail] = useState<MaintenancePlan | null>(null);
   const [showSafetyCheck, setShowSafetyCheck] = useState(false);
+  const [showAddModal, setShowAddModal] = useState(false);
   const [localCheckItems, setLocalCheckItems] = useState(safetyCheckItems);
+  const [newPlan, setNewPlan] = useState({
+    equipmentId: '',
+    type: 'level1' as MaintenanceType,
+    planDate: new Date().toISOString().split('T')[0],
+    window: '08:00-10:00',
+    items: defaultMaintenanceItems['level1'],
+    executor: '',
+  });
+
+  const handleTypeChange = (type: MaintenanceType) => {
+    setNewPlan(prev => ({
+      ...prev,
+      type,
+      items: defaultMaintenanceItems[type],
+    }));
+  };
+
+  const handleAddPlan = () => {
+    if (!newPlan.equipmentId || !newPlan.planDate || !newPlan.window) return;
+    addMaintenancePlan({
+      equipmentId: newPlan.equipmentId,
+      type: newPlan.type,
+      planDate: newPlan.planDate,
+      window: newPlan.window,
+      status: 'pending',
+      items: newPlan.items,
+      executor: newPlan.executor || undefined,
+    });
+    setShowAddModal(false);
+    setNewPlan({
+      equipmentId: '',
+      type: 'level1',
+      planDate: new Date().toISOString().split('T')[0],
+      window: '08:00-10:00',
+      items: defaultMaintenanceItems['level1'],
+      executor: '',
+    });
+  };
 
   const stats = useMemo(() => {
     const total = maintenancePlans.length;
@@ -70,7 +116,10 @@ export default function Upkeep() {
           <h1 className="text-2xl font-bold text-industrial-800">保养排程</h1>
           <p className="text-sm text-industrial-500 mt-1">设备保养计划与执行管理</p>
         </div>
-        <button className="btn-primary flex items-center gap-2">
+        <button
+          onClick={() => setShowAddModal(true)}
+          className="btn-primary flex items-center gap-2"
+        >
           <Plus className="w-4 h-4" />
           新增保养计划
         </button>
@@ -200,6 +249,121 @@ export default function Upkeep() {
           </table>
         </div>
       </div>
+
+      {showAddModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-industrial shadow-xl w-full max-w-lg max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between p-6 border-b border-industrial-100">
+              <h3 className="text-lg font-semibold text-industrial-800">新增保养计划</h3>
+              <button
+                onClick={() => setShowAddModal(false)}
+                className="p-1 hover:bg-industrial-100 rounded transition-colors"
+              >
+                <X className="w-5 h-5 text-industrial-500" />
+              </button>
+            </div>
+            <div className="p-6 space-y-4">
+              <div>
+                <label className="form-label">设备</label>
+                <select
+                  className="input-field"
+                  value={newPlan.equipmentId}
+                  onChange={(e) => setNewPlan(prev => ({ ...prev, equipmentId: e.target.value }))}
+                >
+                  <option value="">请选择设备</option>
+                  {equipments.map(eq => (
+                    <option key={eq.id} value={eq.id}>{eq.name}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="form-label">保养类型</label>
+                <div className="grid grid-cols-3 gap-3">
+                  {(Object.keys(MaintenanceTypeLabels) as MaintenanceType[]).map(type => (
+                    <label key={type}>
+                      <input
+                        type="radio"
+                        name="maintenanceType"
+                        value={type}
+                        checked={newPlan.type === type}
+                        onChange={() => handleTypeChange(type)}
+                        className="sr-only"
+                      />
+                      <div className={`p-3 rounded-industrial border-2 cursor-pointer transition-all text-center ${
+                        newPlan.type === type
+                          ? 'border-primary-900 bg-primary-50 text-primary-900'
+                          : 'border-industrial-200 hover:border-primary-300'
+                      }`}>
+                        <p className="text-sm font-medium">{MaintenanceTypeLabels[type]}</p>
+                      </div>
+                    </label>
+                  ))}
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="form-label">计划日期</label>
+                  <input
+                    type="date"
+                    className="input-field"
+                    value={newPlan.planDate}
+                    onChange={(e) => setNewPlan(prev => ({ ...prev, planDate: e.target.value }))}
+                  />
+                </div>
+                <div>
+                  <label className="form-label">保养窗口</label>
+                  <select
+                    className="input-field"
+                    value={newPlan.window}
+                    onChange={(e) => setNewPlan(prev => ({ ...prev, window: e.target.value }))}
+                  >
+                    <option value="08:00-10:00">08:00-10:00</option>
+                    <option value="10:00-12:00">10:00-12:00</option>
+                    <option value="14:00-16:00">14:00-16:00</option>
+                    <option value="16:00-18:00">16:00-18:00</option>
+                    <option value="20:00-22:00">20:00-22:00</option>
+                    <option value="22:00-24:00">22:00-24:00</option>
+                  </select>
+                </div>
+              </div>
+              <div>
+                <label className="form-label">执行人 (选填)</label>
+                <input
+                  type="text"
+                  className="input-field"
+                  placeholder="请输入执行人姓名"
+                  value={newPlan.executor}
+                  onChange={(e) => setNewPlan(prev => ({ ...prev, executor: e.target.value }))}
+                />
+              </div>
+              <div>
+                <p className="form-label">保养项目</p>
+                <div className="p-3 bg-industrial-50 rounded-industrial">
+                  <ul className="space-y-2">
+                    {newPlan.items.map((item, idx) => (
+                      <li key={idx} className="text-sm text-industrial-700 flex items-center gap-2">
+                        <span className="w-1.5 h-1.5 rounded-full bg-primary-500" />
+                        {item}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              </div>
+            </div>
+            <div className="flex justify-end gap-3 p-6 border-t border-industrial-100">
+              <button onClick={() => setShowAddModal(false)} className="btn-secondary">取消</button>
+              <button
+                onClick={handleAddPlan}
+                className="btn-primary flex items-center gap-2"
+                disabled={!newPlan.equipmentId || !newPlan.planDate || !newPlan.window}
+              >
+                <Save className="w-4 h-4" />
+                创建计划
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {showSafetyCheck && showDetail && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
