@@ -11,6 +11,8 @@ export type FeedbackStatus = 'pending' | 'processing' | 'completed';
 export type ShiftType = 'day' | 'night';
 export type AcceptanceResult = 'passed' | 'failed' | 'pending';
 export type ApprovalStatus = 'pending' | 'approved' | 'rejected' | 'none';
+export type SettlementStatus = 'unsettled' | 'pending' | 'approved' | 'rejected' | 'completed';
+export type CostCategory = 'labor' | 'spare' | 'external' | 'material' | 'other';
 
 export interface Equipment {
   id: string;
@@ -46,6 +48,23 @@ export interface ExternalTrackRecord {
   attachmentNote?: string;
 }
 
+export interface CostItem {
+  id: string;
+  category: CostCategory;
+  amount: number;
+  description: string;
+  attachmentNote?: string;
+}
+
+export interface ApprovalHistoryRecord {
+  id: string;
+  action: 'submit' | 'approve' | 'reject';
+  operator: string;
+  time: string;
+  remark?: string;
+  costSnapshot?: CostItem[];
+}
+
 export interface FaultOrder {
   id: string;
   equipmentId: string;
@@ -74,6 +93,9 @@ export interface FaultOrder {
   approvalTime?: string;
   lastFollowTime?: string;
   latestQuoteAmount?: number;
+  settlementStatus?: SettlementStatus;
+  costItems?: CostItem[];
+  approvalHistory?: ApprovalHistoryRecord[];
 }
 
 export interface MaintenancePlan {
@@ -247,4 +269,20 @@ export const ApprovalStatusLabels: Record<ApprovalStatus, string> = {
   'approved': '已通过',
   'rejected': '已退回',
   'none': '无需审批',
+};
+
+export const SettlementStatusLabels: Record<SettlementStatus, string> = {
+  'unsettled': '待结算',
+  'pending': '审批中',
+  'approved': '审批通过',
+  'rejected': '已退回',
+  'completed': '结算完成',
+};
+
+export const CostCategoryLabels: Record<CostCategory, string> = {
+  'labor': '人工费',
+  'spare': '备件费',
+  'external': '外协费',
+  'material': '材料费',
+  'other': '其他费用',
 };

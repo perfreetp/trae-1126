@@ -23,6 +23,12 @@ import {
   ThumbsDown,
   Layers,
   Monitor,
+  Settings,
+  ChevronDown,
+  ChevronUp,
+  PlusCircle,
+  Trash2,
+  RefreshCw,
 } from 'lucide-react';
 import {
   BarChart,
@@ -41,27 +47,32 @@ import {
   ExternalTrackStatusLabels,
   AcceptanceResultLabels,
   ApprovalStatusLabels,
+  SettlementStatusLabels,
+  CostCategoryLabels,
   type FaultLevel,
   type FaultStatus,
   type FaultOrder,
   type ExternalTrackStatus,
   type AcceptanceResult,
-  type ApprovalStatus,
+  type CostCategory,
+  type CostItem,
 } from '../types';
-
-const APPROVAL_THRESHOLD = 5000;
 
 export default function Maintenance() {
   const {
     faultOrders,
     equipments,
+    approvalThresholds,
     addFaultOrder,
     updateFaultOrder,
     addTrackRecord,
     approveFaultOrder,
     rejectFaultOrder,
+    setApprovalThresholds,
+    addApprovalHistory,
     getEquipmentNameById,
   } = useAppStore();
+  const [searchKeyword, setSearchKeyword] = useState('');
   const [statusFilter, setStatusFilter] = useState<FaultStatus | 'all'>('all');
   const [levelFilter, setLevelFilter] = useState<FaultLevel | 'all'>('all');
   const [equipmentFilter, setEquipmentFilter] = useState<string>('all');
@@ -74,7 +85,10 @@ export default function Maintenance() {
   const [showTrackModal, setShowTrackModal] = useState<FaultOrder | null>(null);
   const [showSettleModal, setShowSettleModal] = useState<FaultOrder | null>(null);
   const [showApprovalModal, setShowApprovalModal] = useState<FaultOrder | null>(null);
+  const [showThresholdModal, setShowThresholdModal] = useState(false);
+  const [expandedCostRows, setExpandedCostRows] = useState<Set<string>>(new Set());
   const [approvalForm, setApprovalForm] = useState({ remark: '', approver: '' });
+  const [thresholdForm, setThresholdForm] = useState({ internal: '3000', external: '5000' });
   const [newFault, setNewFault] = useState({
     equipmentId: '',
     title: '',
@@ -93,7 +107,6 @@ export default function Maintenance() {
   });
   const [completeForm, setCompleteForm] = useState({
     downtime: '',
-    cost: '',
     accidentRelated: '',
     repairRemark: '',
   });
@@ -107,11 +120,11 @@ export default function Maintenance() {
   });
   const [settleForm, setSettleForm] = useState({
     downtime: '',
-    cost: '',
     accidentRelated: '',
     repairRemark: '',
     acceptanceResult: 'passed' as AcceptanceResult,
     acceptanceRemark: '',
+    costItems: [] as CostItem[],
   });
 
   const stats = useMemo(() => {
@@ -120,7 +133,7 @@ export default function Maintenance() {
     const processing = faultOrders.filter(f => f.status === 'processing').length;
     const completed = faultOrders.filter(f => f.status === 'completed').length;
     const totalCost = faultOrders.reduce((sum, f) => sum + (f.cost || 0), 0);
-    const pendingApproval = faultOrders.filter(f => f.approvalStatus === 'pending').length;
+    const pendingApproval = faultOrders.filter(f => f.settlementStatus === 'pending').length;
     return { total, pending, processing, completed, totalCost, pendingApproval };
   }, [faultOrders]);
 
@@ -190,9 +203,16 @@ export default function Maintenance() {
       const matchLevel = levelFilter === 'all' || f.level === levelFilter;
       const matchEquipment = equipmentFilter === 'all' || f.equipmentId === equipmentFilter;
       const matchRepairType = repairTypeFilter === 'all' || f.repairType === repairTypeFilter;
-      return matchStatus && matchLevel && matchEquipment && matchRepairType;
+      const keyword = searchKeyword.toLowerCase();
+      const matchSearch = keyword === '' ||
+        f.title.toLowerCase().includes(keyword) ||
+        getEquipmentNameById(f.equipmentId).toLowerCase().includes(keyword) ||
+        f.id.toLowerCase().includes(keyword);
+      return matchStatus && matchLevel && matchEquipment && matchRepairType && matchSearch;
     }).sort((a, b) => b.reportTime.localeCompare(a.reportTime));
-  }, [faultOrders, statusFilter, levelFilter, equipmentFilter, repairTypeFilter]);
+  }, [faultOrders, statusFilter, levelFilter, equipmentFilter, repairTypeFilter, searchKeyword, getEquipmentNameById]);
+
+  const generateId = () => Math.random().toString(36).substr(2, 9);
 
   const handleAddFault = () => {
     if (!newFault.equipmentId || !newFault.title || !newFault.description || !newFault.reporter) return;
@@ -202,6 +222,9 @@ export default function Maintenance() {
       reportTime: new Date().toISOString().replace('T', ' ').slice(0, 19),
       trackRecords: [],
       approvalStatus: 'none',
+      settlementStatus: 'unsettled',
+      costItems: [],
+      approvalHistory: [],
     });
     setShowAddModal(false);
     setNewFault({ equipmentId: '', title: '', description: '', level: 'normal', reporter: '', repairType: 'internal' });
@@ -229,23 +252,16 @@ export default function Maintenance() {
 
   const handleComplete = () => {
     if (!showCompleteModal) return;
-    const cost = completeForm.cost ? parseFloat(completeForm.cost) : 0;
-    const needsApproval = cost >= APPROVAL_THRESHOLD;
     const updates: Partial<FaultOrder> = {
       status: 'completed',
+      settlementStatus: 'unsettled',
     };
     if (completeForm.downtime) updates.downtime = parseFloat(completeForm.downtime);
-    if (completeForm.cost) updates.cost = cost;
     if (completeForm.accidentRelated) updates.accidentRelated = completeForm.accidentRelated;
     if (completeForm.repairRemark) updates.repairRemark = completeForm.repairRemark;
-    if (needsApproval) {
-      updates.approvalStatus = 'pending';
-    } else {
-      updates.approvalStatus = 'none';
-    }
     updateFaultOrder(showCompleteModal.id, updates);
     setShowCompleteModal(null);
-    setCompleteForm({ downtime: '', cost: '', accidentRelated: '', repairRemark: '' });
+    setCompleteForm({ downtime: '', accidentRelated: '', repairRemark: '' });
   };
 
   const handleAddTrack = () => {
@@ -263,28 +279,69 @@ export default function Maintenance() {
     setTrackForm({ status: 'contacted', remark: '', operator: '', quoteAmount: '', estimatedCompletion: '', attachmentNote: '' });
   };
 
-  const handleSettle = () => {
+  const calculateTotalCost = (items: CostItem[]) => {
+    return items.reduce((sum, item) => sum + item.amount, 0);
+  };
+
+  const addCostItem = (category: CostCategory) => {
+    const newItem: CostItem = {
+      id: generateId(),
+      category,
+      amount: 0,
+      description: '',
+    };
+    setSettleForm(prev => ({ ...prev, costItems: [...prev.costItems, newItem] }));
+  };
+
+  const updateCostItem = (id: string, updates: Partial<CostItem>) => {
+    setSettleForm(prev => ({
+      ...prev,
+      costItems: prev.costItems.map(item =>
+        item.id === id ? { ...item, ...updates } : item
+      ),
+    }));
+  };
+
+  const removeCostItem = (id: string) => {
+    setSettleForm(prev => ({
+      ...prev,
+      costItems: prev.costItems.filter(item => item.id !== id),
+    }));
+  };
+
+  const handleSettleSubmit = () => {
     if (!showSettleModal) return;
-    const cost = settleForm.cost ? parseFloat(settleForm.cost) : 0;
-    const needsApproval = cost >= APPROVAL_THRESHOLD;
-    const updates: Partial<FaultOrder> = {};
+    const totalCost = calculateTotalCost(settleForm.costItems);
+    const threshold = showSettleModal.repairType === 'external' ? approvalThresholds.external : approvalThresholds.internal;
+    const needsApproval = totalCost >= threshold;
+    const now = new Date().toISOString().replace('T', ' ').slice(0, 19);
+
+    const updates: Partial<FaultOrder> = {
+      cost: totalCost,
+      costItems: settleForm.costItems,
+      acceptanceResult: settleForm.acceptanceResult,
+      settlementStatus: needsApproval ? 'pending' : 'completed',
+      approvalStatus: needsApproval ? 'pending' : 'none',
+    };
     if (settleForm.downtime) updates.downtime = parseFloat(settleForm.downtime);
-    if (settleForm.cost) updates.cost = cost;
     if (settleForm.accidentRelated) updates.accidentRelated = settleForm.accidentRelated;
     if (settleForm.repairRemark) updates.repairRemark = settleForm.repairRemark;
-    updates.acceptanceResult = settleForm.acceptanceResult;
     if (settleForm.acceptanceRemark) updates.acceptanceRemark = settleForm.acceptanceRemark;
-    
-    const currentOrder = faultOrders.find(f => f.id === showSettleModal.id);
-    const wasApproved = currentOrder?.approvalStatus === 'approved';
-    
-    if (needsApproval && !wasApproved) {
-      updates.approvalStatus = 'pending';
-    }
-    
+
     updateFaultOrder(showSettleModal.id, updates);
+
+    if (needsApproval) {
+      addApprovalHistory(showSettleModal.id, {
+        action: 'submit',
+        operator: '当前用户',
+        time: now,
+        remark: '提交结算审批',
+        costSnapshot: settleForm.costItems,
+      });
+    }
+
     setShowSettleModal(null);
-    setSettleForm({ downtime: '', cost: '', accidentRelated: '', repairRemark: '', acceptanceResult: 'passed', acceptanceRemark: '' });
+    setSettleForm({ downtime: '', accidentRelated: '', repairRemark: '', acceptanceResult: 'passed', acceptanceRemark: '', costItems: [] });
   };
 
   const handleApprove = () => {
@@ -301,6 +358,14 @@ export default function Maintenance() {
     setApprovalForm({ remark: '', approver: '' });
   };
 
+  const handleSaveThresholds = () => {
+    setApprovalThresholds({
+      internal: parseFloat(thresholdForm.internal),
+      external: parseFloat(thresholdForm.external),
+    });
+    setShowThresholdModal(false);
+  };
+
   const handleEquipmentClick = (equipmentId: string) => {
     setEquipmentFilter(equipmentId);
   };
@@ -312,17 +377,30 @@ export default function Maintenance() {
   const clearAllFilters = () => {
     setEquipmentFilter('all');
     setRepairTypeFilter('all');
+    setSearchKeyword('');
+  };
+
+  const toggleCostExpand = (id: string) => {
+    setExpandedCostRows(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
   };
 
   const openSettleModal = (fault: FaultOrder) => {
     setShowSettleModal(fault);
     setSettleForm({
       downtime: fault.downtime?.toString() || '',
-      cost: fault.cost?.toString() || '',
       accidentRelated: fault.accidentRelated || '',
       repairRemark: fault.repairRemark || '',
       acceptanceResult: fault.acceptanceResult || 'passed',
       acceptanceRemark: fault.acceptanceRemark || '',
+      costItems: fault.costItems?.length ? [...fault.costItems] : [],
     });
   };
 
@@ -343,11 +421,13 @@ export default function Maintenance() {
     });
   };
 
-  const getApprovalBadgeColor = (status: ApprovalStatus) => {
+  const getSettlementBadgeColor = (status?: string) => {
     switch (status) {
+      case 'unsettled': return 'bg-gray-100 text-gray-600';
       case 'pending': return 'bg-yellow-100 text-yellow-800';
       case 'approved': return 'bg-green-100 text-green-800';
       case 'rejected': return 'bg-red-100 text-red-800';
+      case 'completed': return 'bg-green-100 text-green-800';
       default: return 'bg-gray-100 text-gray-600';
     }
   };
@@ -357,15 +437,30 @@ export default function Maintenance() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-industrial-800">故障维修</h1>
-          <p className="text-sm text-industrial-500 mt-1">故障工单管理、维修派单、外协跟踪与费用审批</p>
+          <p className="text-sm text-industrial-500 mt-1">故障工单管理、维修派单、外协跟踪与费用审批结算</p>
         </div>
-        <button
-          onClick={() => setShowAddModal(true)}
-          className="btn-primary flex items-center gap-2"
-        >
-          <Plus className="w-4 h-4" />
-          新增故障
-        </button>
+        <div className="flex items-center gap-3">
+          <button
+            onClick={() => {
+              setThresholdForm({
+                internal: approvalThresholds.internal.toString(),
+                external: approvalThresholds.external.toString(),
+              });
+              setShowThresholdModal(true);
+            }}
+            className="btn-secondary flex items-center gap-2"
+          >
+            <Settings className="w-4 h-4" />
+            审批阈值
+          </button>
+          <button
+            onClick={() => setShowAddModal(true)}
+            className="btn-primary flex items-center gap-2"
+          >
+            <Plus className="w-4 h-4" />
+            新增故障
+          </button>
+        </div>
       </div>
 
       <div className="grid grid-cols-2 md:grid-cols-6 gap-4">
@@ -480,10 +575,16 @@ export default function Maintenance() {
         <div className="flex flex-col md:flex-row gap-4 mb-6">
           <div className="relative flex-1">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-industrial-400" />
-            <input type="text" placeholder="搜索工单标题、设备..." className="input-field pl-10" />
+            <input
+              type="text"
+              placeholder="搜索工单标题、设备名称、工单号..."
+              className="input-field pl-10"
+              value={searchKeyword}
+              onChange={(e) => setSearchKeyword(e.target.value)}
+            />
           </div>
           <div className="flex gap-3 flex-wrap">
-            {(equipmentFilter !== 'all' || repairTypeFilter !== 'all') && (
+            {(equipmentFilter !== 'all' || repairTypeFilter !== 'all' || searchKeyword !== '') && (
               <button
                 onClick={clearAllFilters}
                 className="btn-secondary flex items-center gap-2 text-sm"
@@ -532,12 +633,13 @@ export default function Maintenance() {
           <table className="data-table">
             <thead>
               <tr>
+                <th></th>
                 <th>工单编号</th>
                 <th>故障标题</th>
                 <th>设备</th>
                 <th>级别</th>
-                <th>状态</th>
-                <th>审批状态</th>
+                <th>工单状态</th>
+                <th>结算状态</th>
                 <th>处理人</th>
                 <th>维修类型</th>
                 <th>外协状态</th>
@@ -550,143 +652,230 @@ export default function Maintenance() {
               </tr>
             </thead>
             <tbody>
-              {filteredFaults.map(fault => (
-                <tr key={fault.id} className="cursor-pointer" onClick={() => setShowDetailModal(fault)}>
-                  <td className="font-mono text-sm text-primary-700">{fault.id.toUpperCase()}</td>
-                  <td className="font-medium text-industrial-800">{fault.title}</td>
-                  <td>{getEquipmentNameById(fault.equipmentId)}</td>
-                  <td><StatusBadge status={fault.level} type="fault-level" /></td>
-                  <td><StatusBadge status={fault.status} type="fault-status" /></td>
-                  <td>
-                    {fault.approvalStatus && fault.approvalStatus !== 'none' ? (
-                      <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${getApprovalBadgeColor(fault.approvalStatus)}`}>
-                        {ApprovalStatusLabels[fault.approvalStatus]}
-                      </span>
-                    ) : (
-                      <span className="text-industrial-300 text-xs">-</span>
+              {filteredFaults.map(fault => {
+                const isExpanded = expandedCostRows.has(fault.id);
+                const hasCostItems = fault.costItems && fault.costItems.length > 0;
+                return (
+                  <>
+                    <tr key={fault.id} className="cursor-pointer" onClick={() => setShowDetailModal(fault)}>
+                      <td onClick={(e) => { e.stopPropagation(); toggleCostExpand(fault.id); }}>
+                        {hasCostItems && (
+                          <button className="p-1 hover:bg-industrial-100 rounded transition-colors">
+                            {isExpanded ? (
+                              <ChevronUp className="w-4 h-4 text-industrial-500" />
+                            ) : (
+                              <ChevronDown className="w-4 h-4 text-industrial-500" />
+                            )}
+                          </button>
+                        )}
+                      </td>
+                      <td className="font-mono text-sm text-primary-700">{fault.id.toUpperCase()}</td>
+                      <td className="font-medium text-industrial-800">{fault.title}</td>
+                      <td>{getEquipmentNameById(fault.equipmentId)}</td>
+                      <td><StatusBadge status={fault.level} type="fault-level" /></td>
+                      <td><StatusBadge status={fault.status} type="fault-status" /></td>
+                      <td>
+                        {fault.settlementStatus && fault.settlementStatus !== 'unsettled' ? (
+                          <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${getSettlementBadgeColor(fault.settlementStatus)}`}>
+                            {SettlementStatusLabels[fault.settlementStatus]}
+                          </span>
+                        ) : (
+                          <span className="text-industrial-300 text-xs">待结算</span>
+                        )}
+                      </td>
+                      <td>
+                        {fault.assignee ? (
+                          <span className="flex items-center gap-1 text-sm">
+                            <User className="w-3.5 h-3.5" />
+                            {fault.assignee}
+                          </span>
+                        ) : (
+                          <span className="text-industrial-400 text-sm">未指派</span>
+                        )}
+                      </td>
+                      <td>
+                        <span className={fault.repairType === 'external' ? 'text-purple-600 text-xs' : 'text-primary-600 text-xs'}>
+                          {fault.repairType === 'internal' ? '内部维修' : '外协维修'}
+                        </span>
+                      </td>
+                      <td>
+                        {fault.repairType === 'external' && fault.externalStatus ? (
+                          <span className="text-xs text-industrial-600 font-medium">
+                            {ExternalTrackStatusLabels[fault.externalStatus]}
+                          </span>
+                        ) : (
+                          <span className="text-industrial-300 text-xs">-</span>
+                        )}
+                      </td>
+                      <td>
+                        {fault.lastFollowTime ? (
+                          <span className="text-xs text-industrial-500">{fault.lastFollowTime.slice(5, 16)}</span>
+                        ) : (
+                          <span className="text-industrial-300 text-xs">-</span>
+                        )}
+                      </td>
+                      <td>
+                        {fault.latestQuoteAmount ? (
+                          <span className="text-xs font-medium text-accent-teal">¥{fault.latestQuoteAmount.toLocaleString()}</span>
+                        ) : (
+                          <span className="text-industrial-300 text-xs">-</span>
+                        )}
+                      </td>
+                      <td>
+                        {fault.downtime ? (
+                          <span className="text-sm font-medium text-accent-orange">{fault.downtime}h</span>
+                        ) : (
+                          <span className="text-industrial-300 text-sm">-</span>
+                        )}
+                      </td>
+                      <td>
+                        {fault.cost ? (
+                          <span className="text-sm font-medium text-accent-teal">¥{fault.cost.toLocaleString()}</span>
+                        ) : (
+                          <span className="text-industrial-300 text-sm">-</span>
+                        )}
+                      </td>
+                      <td>
+                        {fault.accidentRelated ? (
+                          <span className="text-xs text-accent-orange truncate max-w-24 block">{fault.accidentRelated}</span>
+                        ) : (
+                          <span className="text-industrial-300 text-sm">-</span>
+                        )}
+                      </td>
+                      <td>
+                        <div className="flex items-center gap-1">
+                          {fault.status === 'pending' && (
+                            <button
+                              onClick={(e) => { e.stopPropagation(); openAssignModal(fault); }}
+                              className="p-1.5 text-accent-teal hover:bg-accent-teal/10 rounded transition-colors"
+                              title="派单"
+                            >
+                              <UserCheck className="w-4 h-4" />
+                            </button>
+                          )}
+                          {fault.status === 'processing' && fault.repairType === 'external' && (
+                            <button
+                              onClick={(e) => { e.stopPropagation(); setShowTrackModal(fault); }}
+                              className="p-1.5 text-purple-600 hover:bg-purple-50 rounded transition-colors"
+                              title="外协跟踪"
+                            >
+                              <Truck className="w-4 h-4" />
+                            </button>
+                          )}
+                          {fault.status === 'processing' && (
+                            <button
+                              onClick={(e) => { e.stopPropagation(); setShowCompleteModal(fault); }}
+                              className="p-1.5 text-accent-teal hover:bg-accent-teal/10 rounded transition-colors"
+                              title="完成维修"
+                            >
+                              <CheckCircle className="w-4 h-4" />
+                            </button>
+                          )}
+                          {fault.status === 'completed' && fault.settlementStatus === 'pending' && (
+                            <button
+                              onClick={(e) => { e.stopPropagation(); openApprovalModal(fault); }}
+                              className="p-1.5 text-yellow-600 hover:bg-yellow-50 rounded transition-colors"
+                              title="费用审批"
+                            >
+                              <Clock className="w-4 h-4" />
+                            </button>
+                          )}
+                          {fault.status === 'completed' && (
+                            <button
+                              onClick={(e) => { e.stopPropagation(); openSettleModal(fault); }}
+                              className="p-1.5 text-primary-600 hover:bg-primary-50 rounded transition-colors"
+                              title="维修结算"
+                            >
+                              <FileText className="w-4 h-4" />
+                            </button>
+                          )}
+                          <button
+                            onClick={(e) => { e.stopPropagation(); setShowDetailModal(fault); }}
+                            className="p-1.5 text-primary-600 hover:bg-primary-50 rounded transition-colors"
+                            title="查看详情"
+                          >
+                            <Edit3 className="w-4 h-4" />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                    {isExpanded && hasCostItems && (
+                      <tr key={`${fault.id}-cost`} className="bg-industrial-50">
+                        <td colSpan={16} className="py-4 px-12">
+                          <div className="text-sm">
+                            <p className="font-medium text-industrial-700 mb-2">费用明细</p>
+                            <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+                              {fault.costItems!.map(item => (
+                                <div key={item.id} className="bg-white p-3 rounded-industrial border border-industrial-200">
+                                  <p className="text-xs text-industrial-500 mb-1">{CostCategoryLabels[item.category]}</p>
+                                  <p className="font-medium text-industrial-800">¥{item.amount.toLocaleString()}</p>
+                                  {item.description && (
+                                    <p className="text-xs text-industrial-600 mt-1">{item.description}</p>
+                                  )}
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        </td>
+                      </tr>
                     )}
-                  </td>
-                  <td>
-                    {fault.assignee ? (
-                      <span className="flex items-center gap-1 text-sm">
-                        <User className="w-3.5 h-3.5" />
-                        {fault.assignee}
-                      </span>
-                    ) : (
-                      <span className="text-industrial-400 text-sm">未指派</span>
-                    )}
-                  </td>
-                  <td>
-                    <span className={fault.repairType === 'external' ? 'text-purple-600 text-xs' : 'text-primary-600 text-xs'}>
-                      {fault.repairType === 'internal' ? '内部维修' : '外协维修'}
-                    </span>
-                  </td>
-                  <td>
-                    {fault.repairType === 'external' && fault.externalStatus ? (
-                      <span className="text-xs text-industrial-600 font-medium">
-                        {ExternalTrackStatusLabels[fault.externalStatus]}
-                      </span>
-                    ) : (
-                      <span className="text-industrial-300 text-xs">-</span>
-                    )}
-                  </td>
-                  <td>
-                    {fault.lastFollowTime ? (
-                      <span className="text-xs text-industrial-500">{fault.lastFollowTime.slice(5, 16)}</span>
-                    ) : (
-                      <span className="text-industrial-300 text-xs">-</span>
-                    )}
-                  </td>
-                  <td>
-                    {fault.latestQuoteAmount ? (
-                      <span className="text-xs font-medium text-accent-teal">¥{fault.latestQuoteAmount.toLocaleString()}</span>
-                    ) : (
-                      <span className="text-industrial-300 text-xs">-</span>
-                    )}
-                  </td>
-                  <td>
-                    {fault.downtime ? (
-                      <span className="text-sm font-medium text-accent-orange">{fault.downtime}h</span>
-                    ) : (
-                      <span className="text-industrial-300 text-sm">-</span>
-                    )}
-                  </td>
-                  <td>
-                    {fault.cost ? (
-                      <span className="text-sm font-medium text-accent-teal">¥{fault.cost.toLocaleString()}</span>
-                    ) : (
-                      <span className="text-industrial-300 text-sm">-</span>
-                    )}
-                  </td>
-                  <td>
-                    {fault.accidentRelated ? (
-                      <span className="text-xs text-accent-orange truncate max-w-24 block">{fault.accidentRelated}</span>
-                    ) : (
-                      <span className="text-industrial-300 text-sm">-</span>
-                    )}
-                  </td>
-                  <td>
-                    <div className="flex items-center gap-1">
-                      {fault.status === 'pending' && (
-                        <button
-                          onClick={(e) => { e.stopPropagation(); openAssignModal(fault); }}
-                          className="p-1.5 text-accent-teal hover:bg-accent-teal/10 rounded transition-colors"
-                          title="派单"
-                        >
-                          <UserCheck className="w-4 h-4" />
-                        </button>
-                      )}
-                      {fault.status === 'processing' && fault.repairType === 'external' && (
-                        <button
-                          onClick={(e) => { e.stopPropagation(); setShowTrackModal(fault); }}
-                          className="p-1.5 text-purple-600 hover:bg-purple-50 rounded transition-colors"
-                          title="外协跟踪"
-                        >
-                          <Truck className="w-4 h-4" />
-                        </button>
-                      )}
-                      {fault.status === 'processing' && (
-                        <button
-                          onClick={(e) => { e.stopPropagation(); setShowCompleteModal(fault); }}
-                          className="p-1.5 text-accent-teal hover:bg-accent-teal/10 rounded transition-colors"
-                          title="完成维修"
-                        >
-                          <CheckCircle className="w-4 h-4" />
-                        </button>
-                      )}
-                      {fault.status === 'completed' && fault.approvalStatus === 'pending' && (
-                        <button
-                          onClick={(e) => { e.stopPropagation(); openApprovalModal(fault); }}
-                          className="p-1.5 text-yellow-600 hover:bg-yellow-50 rounded transition-colors"
-                          title="费用审批"
-                        >
-                          <Clock className="w-4 h-4" />
-                        </button>
-                      )}
-                      {fault.status === 'completed' && (
-                        <button
-                          onClick={(e) => { e.stopPropagation(); openSettleModal(fault); }}
-                          className="p-1.5 text-primary-600 hover:bg-primary-50 rounded transition-colors"
-                          title="维修结算"
-                        >
-                          <FileText className="w-4 h-4" />
-                        </button>
-                      )}
-                      <button
-                        onClick={(e) => { e.stopPropagation(); setShowDetailModal(fault); }}
-                        className="p-1.5 text-primary-600 hover:bg-primary-50 rounded transition-colors"
-                        title="查看详情"
-                      >
-                        <Edit3 className="w-4 h-4" />
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
+                  </>
+                );
+              })}
             </tbody>
           </table>
         </div>
       </div>
+
+      {showThresholdModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-industrial shadow-xl w-full max-w-md">
+            <div className="flex items-center justify-between p-6 border-b border-industrial-100">
+              <h3 className="text-lg font-semibold text-industrial-800">审批阈值设置</h3>
+              <button
+                onClick={() => setShowThresholdModal(false)}
+                className="p-1 hover:bg-industrial-100 rounded transition-colors"
+              >
+                <X className="w-5 h-5 text-industrial-500" />
+              </button>
+            </div>
+            <div className="p-6 space-y-4">
+              <div>
+                <label className="form-label">内部维修审批阈值 (元)</label>
+                <input
+                  type="number"
+                  min="0"
+                  className="input-field"
+                  value={thresholdForm.internal}
+                  onChange={(e) => setThresholdForm(prev => ({ ...prev, internal: e.target.value }))}
+                />
+                <p className="text-xs text-industrial-500 mt-1">超过此金额的内部维修结算需要审批</p>
+              </div>
+              <div>
+                <label className="form-label">外协维修审批阈值 (元)</label>
+                <input
+                  type="number"
+                  min="0"
+                  className="input-field"
+                  value={thresholdForm.external}
+                  onChange={(e) => setThresholdForm(prev => ({ ...prev, external: e.target.value }))}
+                />
+                <p className="text-xs text-industrial-500 mt-1">超过此金额的外协维修结算需要审批</p>
+              </div>
+            </div>
+            <div className="flex justify-end gap-3 p-6 border-t border-industrial-100">
+              <button onClick={() => setShowThresholdModal(false)} className="btn-secondary">取消</button>
+              <button
+                onClick={handleSaveThresholds}
+                className="btn-primary flex items-center gap-2"
+              >
+                <Save className="w-4 h-4" />
+                保存设置
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {showAddModal && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
@@ -1021,35 +1210,22 @@ export default function Maintenance() {
                   处理人：{showCompleteModal.assignee}
                 </p>
               </div>
-              <div className="p-3 bg-yellow-50 rounded-industrial">
-                <p className="text-xs text-yellow-700">
-                  <span className="font-medium">提示：</span>维修成本 ≥ ¥{APPROVAL_THRESHOLD.toLocaleString()} 将自动进入待审批状态
+              <div className="p-3 bg-blue-50 rounded-industrial">
+                <p className="text-xs text-blue-700">
+                  <span className="font-medium">提示：</span>维修完成后请在「维修结算」中登记费用明细
                 </p>
               </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="form-label">停机小时</label>
-                  <input
-                    type="number"
-                    step="0.5"
-                    min="0"
-                    className="input-field"
-                    placeholder="例如：4.5"
-                    value={completeForm.downtime}
-                    onChange={(e) => setCompleteForm(prev => ({ ...prev, downtime: e.target.value }))}
-                  />
-                </div>
-                <div>
-                  <label className="form-label">维修成本 (元)</label>
-                  <input
-                    type="number"
-                    min="0"
-                    className="input-field"
-                    placeholder="例如：1500"
-                    value={completeForm.cost}
-                    onChange={(e) => setCompleteForm(prev => ({ ...prev, cost: e.target.value }))}
-                  />
-                </div>
+              <div>
+                <label className="form-label">停机小时</label>
+                <input
+                  type="number"
+                  step="0.5"
+                  min="0"
+                  className="input-field"
+                  placeholder="例如：4.5"
+                  value={completeForm.downtime}
+                  onChange={(e) => setCompleteForm(prev => ({ ...prev, downtime: e.target.value }))}
+                />
               </div>
               <div>
                 <label className="form-label">关联事故 (选填)</label>
@@ -1084,7 +1260,7 @@ export default function Maintenance() {
 
       {showSettleModal && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-industrial shadow-xl w-full max-w-md max-h-[90vh] overflow-y-auto">
+          <div className="bg-white rounded-industrial shadow-xl w-full max-w-xl max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between p-6 border-b border-industrial-100">
               <h3 className="text-lg font-semibold text-industrial-800">维修结算</h3>
               <button
@@ -1104,7 +1280,10 @@ export default function Maintenance() {
               </div>
               <div className="p-3 bg-yellow-50 rounded-industrial">
                 <p className="text-xs text-yellow-700">
-                  <span className="font-medium">提示：</span>维修成本 ≥ ¥{APPROVAL_THRESHOLD.toLocaleString()} 将自动进入待审批状态
+                  <span className="font-medium">审批规则：</span>
+                  内部维修 ≥ ¥{approvalThresholds.internal.toLocaleString()}，
+                  外协维修 ≥ ¥{approvalThresholds.external.toLocaleString()}
+                  自动进入审批流程
                 </p>
               </div>
               <div className="grid grid-cols-2 gap-4">
@@ -1120,35 +1299,86 @@ export default function Maintenance() {
                   />
                 </div>
                 <div>
-                  <label className="form-label">维修成本 (元)</label>
+                  <label className="form-label">关联事故</label>
                   <input
-                    type="number"
-                    min="0"
+                    type="text"
                     className="input-field"
-                    value={settleForm.cost}
-                    onChange={(e) => setSettleForm(prev => ({ ...prev, cost: e.target.value }))}
+                    placeholder="如有，请输入"
+                    value={settleForm.accidentRelated}
+                    onChange={(e) => setSettleForm(prev => ({ ...prev, accidentRelated: e.target.value }))}
                   />
                 </div>
               </div>
               <div>
-                <label className="form-label">关联事故</label>
-                <input
-                  type="text"
-                  className="input-field"
-                  placeholder="如有，请输入事故编号或说明"
-                  value={settleForm.accidentRelated}
-                  onChange={(e) => setSettleForm(prev => ({ ...prev, accidentRelated: e.target.value }))}
-                />
-              </div>
-              <div>
                 <label className="form-label">维修说明</label>
                 <textarea
-                  className="input-field h-20 resize-none"
+                  className="input-field h-16 resize-none"
                   placeholder="维修过程说明..."
                   value={settleForm.repairRemark}
                   onChange={(e) => setSettleForm(prev => ({ ...prev, repairRemark: e.target.value }))}
                 />
               </div>
+
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <label className="form-label mb-0">费用明细</label>
+                  <div className="flex gap-1">
+                    {(['labor', 'spare', 'external', 'material', 'other'] as CostCategory[]).map(cat => (
+                      <button
+                        key={cat}
+                        onClick={() => addCostItem(cat)}
+                        className="px-2 py-1 text-xs bg-industrial-100 hover:bg-primary-100 hover:text-primary-700 rounded transition-colors"
+                      >
+                        + {CostCategoryLabels[cat]}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                {settleForm.costItems.length === 0 ? (
+                  <div className="p-6 border-2 border-dashed border-industrial-200 rounded-industrial text-center">
+                    <DollarSign className="w-8 h-8 text-industrial-300 mx-auto mb-2" />
+                    <p className="text-sm text-industrial-500">点击上方按钮添加费用明细</p>
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    {settleForm.costItems.map(item => (
+                      <div key={item.id} className="flex items-center gap-2 p-2 bg-industrial-50 rounded-industrial">
+                        <span className="text-xs font-medium text-industrial-600 w-16 shrink-0">
+                          {CostCategoryLabels[item.category]}
+                        </span>
+                        <input
+                          type="number"
+                          min="0"
+                          className="input-field flex-1 h-8 py-1 text-sm"
+                          placeholder="金额"
+                          value={item.amount || ''}
+                          onChange={(e) => updateCostItem(item.id, { amount: parseFloat(e.target.value) || 0 })}
+                        />
+                        <input
+                          type="text"
+                          className="input-field flex-1 h-8 py-1 text-sm"
+                          placeholder="说明"
+                          value={item.description}
+                          onChange={(e) => updateCostItem(item.id, { description: e.target.value })}
+                        />
+                        <button
+                          onClick={() => removeCostItem(item.id)}
+                          className="p-1 text-industrial-400 hover:text-red-500 transition-colors"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
+                    ))}
+                    <div className="flex items-center justify-end pt-2 border-t border-industrial-200">
+                      <span className="text-sm text-industrial-600 mr-3">合计：</span>
+                      <span className="text-lg font-bold text-accent-teal">
+                        ¥{calculateTotalCost(settleForm.costItems).toLocaleString()}
+                      </span>
+                    </div>
+                  </div>
+                )}
+              </div>
+
               <div>
                 <label className="form-label">验收结果</label>
                 <div className="flex gap-3">
@@ -1189,9 +1419,9 @@ export default function Maintenance() {
             </div>
             <div className="flex justify-end gap-3 p-6 border-t border-industrial-100">
               <button onClick={() => setShowSettleModal(null)} className="btn-secondary">取消</button>
-              <button onClick={handleSettle} className="btn-primary flex items-center gap-2">
+              <button onClick={handleSettleSubmit} className="btn-primary flex items-center gap-2">
                 <CheckSquare className="w-4 h-4" />
-                保存结算
+                提交结算
               </button>
             </div>
           </div>
@@ -1200,7 +1430,7 @@ export default function Maintenance() {
 
       {showApprovalModal && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-industrial shadow-xl w-full max-w-lg">
+          <div className="bg-white rounded-industrial shadow-xl w-full max-w-lg max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between p-6 border-b border-industrial-100">
               <h3 className="text-lg font-semibold text-industrial-800">费用审批</h3>
               <button
@@ -1238,6 +1468,24 @@ export default function Maintenance() {
                   </div>
                 )}
               </div>
+
+              {showApprovalModal.costItems && showApprovalModal.costItems.length > 0 && (
+                <div className="p-3 bg-industrial-50 rounded-industrial">
+                  <p className="text-sm text-industrial-700 font-medium mb-2">费用明细</p>
+                  <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
+                    {showApprovalModal.costItems.map(item => (
+                      <div key={item.id} className="bg-white p-2 rounded border border-industrial-200">
+                        <p className="text-xs text-industrial-500">{CostCategoryLabels[item.category]}</p>
+                        <p className="font-medium text-industrial-800 text-sm">¥{item.amount.toLocaleString()}</p>
+                        {item.description && (
+                          <p className="text-xs text-industrial-600 truncate">{item.description}</p>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
               {showApprovalModal.trackRecords && showApprovalModal.trackRecords.length > 0 && (
                 <div className="p-3 bg-purple-50 rounded-industrial">
                   <p className="text-sm text-purple-700 font-medium mb-2">外协记录</p>
@@ -1250,6 +1498,7 @@ export default function Maintenance() {
                   ))}
                 </div>
               )}
+
               <div>
                 <label className="form-label">审批人</label>
                 <input
@@ -1305,7 +1554,7 @@ export default function Maintenance() {
               </button>
             </div>
             <div className="p-6 space-y-6">
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
                 <div>
                   <p className="text-sm text-industrial-500">工单编号</p>
                   <p className="font-mono font-medium text-primary-700">{showDetailModal.id.toUpperCase()}</p>
@@ -1315,21 +1564,23 @@ export default function Maintenance() {
                   <StatusBadge status={showDetailModal.level} type="fault-level" />
                 </div>
                 <div>
-                  <p className="text-sm text-industrial-500">设备名称</p>
-                  <p className="font-medium text-industrial-800">{getEquipmentNameById(showDetailModal.equipmentId)}</p>
-                </div>
-                <div>
                   <p className="text-sm text-industrial-500">工单状态</p>
                   <StatusBadge status={showDetailModal.status} type="fault-status" />
                 </div>
-                {showDetailModal.approvalStatus && showDetailModal.approvalStatus !== 'none' && (
-                  <div>
-                    <p className="text-sm text-industrial-500">审批状态</p>
-                    <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${getApprovalBadgeColor(showDetailModal.approvalStatus)}`}>
-                      {ApprovalStatusLabels[showDetailModal.approvalStatus]}
+                <div>
+                  <p className="text-sm text-industrial-500">结算状态</p>
+                  {showDetailModal.settlementStatus ? (
+                    <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${getSettlementBadgeColor(showDetailModal.settlementStatus)}`}>
+                      {SettlementStatusLabels[showDetailModal.settlementStatus]}
                     </span>
-                  </div>
-                )}
+                  ) : (
+                    <span className="text-industrial-400 text-sm">待结算</span>
+                  )}
+                </div>
+                <div>
+                  <p className="text-sm text-industrial-500">设备名称</p>
+                  <p className="font-medium text-industrial-800">{getEquipmentNameById(showDetailModal.equipmentId)}</p>
+                </div>
                 <div>
                   <p className="text-sm text-industrial-500">报告人</p>
                   <p className="font-medium text-industrial-800">{showDetailModal.reporter}</p>
@@ -1337,6 +1588,16 @@ export default function Maintenance() {
                 <div>
                   <p className="text-sm text-industrial-500">报告时间</p>
                   <p className="font-medium text-industrial-800">{showDetailModal.reportTime}</p>
+                </div>
+                <div>
+                  <p className="text-sm text-industrial-500">处理人</p>
+                  <p className="font-medium text-industrial-800">{showDetailModal.assignee || '未指派'}</p>
+                </div>
+                <div>
+                  <p className="text-sm text-industrial-500">维修类型</p>
+                  <p className="font-medium text-industrial-800">
+                    {showDetailModal.repairType === 'internal' ? '内部维修' : '外协维修'}
+                  </p>
                 </div>
               </div>
 
@@ -1352,58 +1613,52 @@ export default function Maintenance() {
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <p className="text-sm text-industrial-500">处理人</p>
-                  <p className="font-medium text-industrial-800">{showDetailModal.assignee || '未指派'}</p>
-                </div>
-                <div>
-                  <p className="text-sm text-industrial-500">维修类型</p>
-                  <p className="font-medium text-industrial-800">
-                    {showDetailModal.repairType === 'internal' ? '内部维修' : '外协维修'}
-                  </p>
-                </div>
-                {showDetailModal.repairType === 'external' && (
-                  <>
+              {showDetailModal.repairType === 'external' && (
+                <div className="p-4 bg-purple-50 rounded-industrial space-y-3">
+                  <h4 className="font-medium text-purple-800">外协信息</h4>
+                  <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
                     <div>
-                      <p className="text-sm text-industrial-500">外协单位</p>
-                      <p className="font-medium text-industrial-800">{showDetailModal.externalVendor || '-'}</p>
+                      <p className="text-xs text-purple-600">外协单位</p>
+                      <p className="text-sm font-medium text-purple-900">{showDetailModal.externalVendor || '-'}</p>
                     </div>
                     <div>
-                      <p className="text-sm text-industrial-500">联系人</p>
-                      <p className="font-medium text-industrial-800">{showDetailModal.externalContact || '-'}</p>
+                      <p className="text-xs text-purple-600">联系人</p>
+                      <p className="text-sm font-medium text-purple-900">{showDetailModal.externalContact || '-'}</p>
                     </div>
                     <div>
-                      <p className="text-sm text-industrial-500">预计到场</p>
-                      <p className="font-medium text-industrial-800">{showDetailModal.externalArrivalTime || '-'}</p>
+                      <p className="text-xs text-purple-600">预计到场</p>
+                      <p className="text-sm font-medium text-purple-900">{showDetailModal.externalArrivalTime || '-'}</p>
                     </div>
                     <div>
-                      <p className="text-sm text-industrial-500">外协进度</p>
-                      <p className="font-medium text-purple-600">
+                      <p className="text-xs text-purple-600">外协进度</p>
+                      <p className="text-sm font-medium text-purple-700">
                         {showDetailModal.externalStatus ? ExternalTrackStatusLabels[showDetailModal.externalStatus] : '-'}
                       </p>
                     </div>
                     {showDetailModal.lastFollowTime && (
                       <div>
-                        <p className="text-sm text-industrial-500">最近跟进时间</p>
-                        <p className="font-medium text-industrial-800">{showDetailModal.lastFollowTime}</p>
+                        <p className="text-xs text-purple-600">最近跟进</p>
+                        <p className="text-sm font-medium text-purple-900">{showDetailModal.lastFollowTime}</p>
                       </div>
                     )}
                     {showDetailModal.latestQuoteAmount && (
                       <div>
-                        <p className="text-sm text-industrial-500">最新报价</p>
-                        <p className="font-medium text-accent-teal">¥{showDetailModal.latestQuoteAmount.toLocaleString()}</p>
+                        <p className="text-xs text-purple-600">最新报价</p>
+                        <p className="text-sm font-bold text-accent-teal">¥{showDetailModal.latestQuoteAmount.toLocaleString()}</p>
                       </div>
                     )}
-                  </>
-                )}
+                  </div>
+                </div>
+              )}
+
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                 <div>
                   <p className="text-sm text-industrial-500">停机时间</p>
-                  <p className="font-medium text-industrial-800">{showDetailModal.downtime ? `${showDetailModal.downtime} 小时` : '-'}</p>
+                  <p className="font-medium text-accent-orange">{showDetailModal.downtime ? `${showDetailModal.downtime} 小时` : '-'}</p>
                 </div>
                 <div>
                   <p className="text-sm text-industrial-500">维修成本</p>
-                  <p className="font-medium text-industrial-800">{showDetailModal.cost ? `¥${showDetailModal.cost.toLocaleString()}` : '-'}</p>
+                  <p className="font-medium text-accent-teal">{showDetailModal.cost ? `¥${showDetailModal.cost.toLocaleString()}` : '-'}</p>
                 </div>
                 {showDetailModal.accidentRelated && (
                   <div>
@@ -1436,6 +1691,23 @@ export default function Maintenance() {
                 )}
               </div>
 
+              {showDetailModal.costItems && showDetailModal.costItems.length > 0 && (
+                <div>
+                  <p className="text-sm text-industrial-500 mb-2">费用明细</p>
+                  <div className="grid grid-cols-2 md:grid-cols-5 gap-2">
+                    {showDetailModal.costItems.map(item => (
+                      <div key={item.id} className="bg-industrial-50 p-3 rounded-industrial border border-industrial-200">
+                        <p className="text-xs text-industrial-500 mb-1">{CostCategoryLabels[item.category]}</p>
+                        <p className="font-medium text-industrial-800">¥{item.amount.toLocaleString()}</p>
+                        {item.description && (
+                          <p className="text-xs text-industrial-600 mt-1">{item.description}</p>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
               {showDetailModal.repairRemark && (
                 <div>
                   <p className="text-sm text-industrial-500 mb-1">维修说明</p>
@@ -1463,6 +1735,41 @@ export default function Maintenance() {
                 </div>
               )}
 
+              {showDetailModal.approvalHistory && showDetailModal.approvalHistory.length > 0 && (
+                <div>
+                  <p className="text-sm text-industrial-500 mb-3 flex items-center gap-2">
+                    <History className="w-4 h-4" />
+                    审批历史
+                  </p>
+                  <div className="space-y-3">
+                    {showDetailModal.approvalHistory.slice().reverse().map((record) => (
+                      <div key={record.id} className="relative pl-6 pb-3 border-l-2 border-primary-200 last:border-0">
+                        <div className={`absolute -left-2 top-0 w-4 h-4 rounded-full ${
+                          record.action === 'submit' ? 'bg-yellow-500' :
+                          record.action === 'approve' ? 'bg-green-500' : 'bg-red-500'
+                        }`} />
+                        <div className="bg-industrial-50 p-3 rounded-industrial">
+                          <div className="flex items-center justify-between mb-1">
+                            <span className={`text-sm font-medium ${
+                              record.action === 'submit' ? 'text-yellow-700' :
+                              record.action === 'approve' ? 'text-green-700' : 'text-red-700'
+                            }`}>
+                              {record.action === 'submit' ? '提交审批' :
+                               record.action === 'approve' ? '审批通过' : '审批退回'}
+                            </span>
+                            <span className="text-xs text-industrial-500">{record.time}</span>
+                          </div>
+                          {record.remark && (
+                            <p className="text-sm text-industrial-700">{record.remark}</p>
+                          )}
+                          <p className="text-xs text-industrial-500 mt-1">操作人：{record.operator}</p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
               {showDetailModal.trackRecords && showDetailModal.trackRecords.length > 0 && (
                 <div>
                   <p className="text-sm text-industrial-500 mb-3 flex items-center gap-2">
@@ -1470,7 +1777,7 @@ export default function Maintenance() {
                     外协跟踪记录
                   </p>
                   <div className="space-y-3">
-                    {showDetailModal.trackRecords.slice().reverse().map((record, idx) => (
+                    {showDetailModal.trackRecords.slice().reverse().map((record) => (
                       <div key={record.id} className="relative pl-6 pb-3 border-l-2 border-purple-200 last:border-0">
                         <div className="absolute -left-2 top-0 w-4 h-4 rounded-full bg-purple-500" />
                         <div className="bg-purple-50 p-3 rounded-industrial">
@@ -1500,8 +1807,8 @@ export default function Maintenance() {
                 </div>
               )}
             </div>
-            <div className="flex justify-between p-6 border-t border-industrial-100 bg-industrial-50">
-              <div className="flex gap-2 flex-wrap">
+            <div className="flex flex-wrap justify-between gap-3 p-6 border-t border-industrial-100 bg-industrial-50">
+              <div className="flex flex-wrap gap-2">
                 {showDetailModal.status === 'pending' && (
                   <button
                     onClick={() => {
@@ -1536,7 +1843,7 @@ export default function Maintenance() {
                     完成维修
                   </button>
                 )}
-                {showDetailModal.status === 'completed' && showDetailModal.approvalStatus === 'pending' && (
+                {showDetailModal.status === 'completed' && showDetailModal.settlementStatus === 'pending' && (
                   <button
                     onClick={() => {
                       setShowDetailModal(null);
@@ -1557,7 +1864,7 @@ export default function Maintenance() {
                     className="btn-secondary flex items-center gap-2"
                   >
                     <FileText className="w-4 h-4" />
-                    维修结算
+                    {showDetailModal.settlementStatus === 'rejected' ? '重新结算' : '维修结算'}
                   </button>
                 )}
               </div>

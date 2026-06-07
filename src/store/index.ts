@@ -14,6 +14,8 @@ import type {
   SafetyCheckItem,
   ShiftType,
   ExternalTrackRecord,
+  CostItem,
+  ApprovalHistoryRecord,
 } from '../types';
 import {
   equipments as initialEquipments,
@@ -29,6 +31,11 @@ import {
   performanceData as initialPerformanceData,
   safetyCheckItems as initialSafetyCheckItems,
 } from '../data/mockData';
+
+interface ApprovalThresholds {
+  internal: number;
+  external: number;
+}
 
 interface AppState {
   currentShift: ShiftType;
@@ -46,6 +53,7 @@ interface AppState {
   safetyCheckItems: SafetyCheckItem[];
   selectedEquipmentId: string | null;
   sidebarCollapsed: boolean;
+  approvalThresholds: ApprovalThresholds;
   
   setCurrentShift: (shift: ShiftType) => void;
   setSelectedEquipmentId: (id: string | null) => void;
@@ -66,6 +74,8 @@ interface AppState {
   addTrackRecord: (faultId: string, record: Omit<ExternalTrackRecord, 'id'>) => void;
   approveFaultOrder: (faultId: string, approver: string, remark?: string) => void;
   rejectFaultOrder: (faultId: string, approver: string, remark: string) => void;
+  setApprovalThresholds: (thresholds: Partial<ApprovalThresholds>) => void;
+  addApprovalHistory: (faultId: string, record: Omit<ApprovalHistoryRecord, 'id'>) => void;
   getEquipmentById: (id: string) => Equipment | undefined;
   getEquipmentNameById: (id: string) => string;
 }
@@ -88,6 +98,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   safetyCheckItems: initialSafetyCheckItems,
   selectedEquipmentId: null,
   sidebarCollapsed: false,
+  approvalThresholds: { internal: 3000, external: 5000 },
 
   setCurrentShift: (shift) => set({ currentShift: shift }),
   setSelectedEquipmentId: (id) => set({ selectedEquipmentId: id }),
@@ -168,28 +179,61 @@ export const useAppStore = create<AppState>((set, get) => ({
   })),
 
   approveFaultOrder: (faultId, approver, remark) => set((state) => ({
-    faultOrders: state.faultOrders.map((o) =>
-      o.id === faultId
-        ? {
-            ...o,
-            approvalStatus: 'approved',
-            approver,
-            approvalRemark: remark,
-            approvalTime: new Date().toISOString().slice(0, 16).replace('T', ' '),
-          }
-        : o
-    ),
+    faultOrders: state.faultOrders.map((o) => {
+      if (o.id !== faultId) return o;
+      const historyRecord: ApprovalHistoryRecord = {
+        id: generateId(),
+        action: 'approve',
+        operator: approver,
+        time: new Date().toISOString().slice(0, 16).replace('T', ' '),
+        remark,
+        costSnapshot: o.costItems,
+      };
+      return {
+        ...o,
+        approvalStatus: 'approved',
+        settlementStatus: 'completed',
+        approver,
+        approvalRemark: remark,
+        approvalTime: new Date().toISOString().slice(0, 16).replace('T', ' '),
+        approvalHistory: [...(o.approvalHistory || []), historyRecord],
+      };
+    }),
   })),
 
   rejectFaultOrder: (faultId, approver, remark) => set((state) => ({
+    faultOrders: state.faultOrders.map((o) => {
+      if (o.id !== faultId) return o;
+      const historyRecord: ApprovalHistoryRecord = {
+        id: generateId(),
+        action: 'reject',
+        operator: approver,
+        time: new Date().toISOString().slice(0, 16).replace('T', ' '),
+        remark,
+        costSnapshot: o.costItems,
+      };
+      return {
+        ...o,
+        approvalStatus: 'rejected',
+        settlementStatus: 'rejected',
+        approver,
+        approvalRemark: remark,
+        approvalTime: new Date().toISOString().slice(0, 16).replace('T', ' '),
+        approvalHistory: [...(o.approvalHistory || []), historyRecord],
+      };
+    }),
+  })),
+
+  setApprovalThresholds: (thresholds) => set((state) => ({
+    approvalThresholds: { ...state.approvalThresholds, ...thresholds },
+  })),
+
+  addApprovalHistory: (faultId, record) => set((state) => ({
     faultOrders: state.faultOrders.map((o) =>
       o.id === faultId
         ? {
             ...o,
-            approvalStatus: 'rejected',
-            approver,
-            approvalRemark: remark,
-            approvalTime: new Date().toISOString().slice(0, 16).replace('T', ' '),
+            approvalHistory: [...(o.approvalHistory || []), { ...record, id: generateId() }],
           }
         : o
     ),
