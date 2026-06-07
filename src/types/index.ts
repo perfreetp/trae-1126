@@ -10,6 +10,7 @@ export type FeedbackType = 'abnormal' | 'suggestion';
 export type FeedbackStatus = 'pending' | 'processing' | 'completed';
 export type ShiftType = 'day' | 'night';
 export type AcceptanceResult = 'passed' | 'failed' | 'pending';
+export type ApprovalStatus = 'pending' | 'approved' | 'rejected' | 'none';
 
 export interface Equipment {
   id: string;
@@ -40,6 +41,9 @@ export interface ExternalTrackRecord {
   remark: string;
   operator: string;
   time: string;
+  quoteAmount?: number;
+  estimatedCompletion?: string;
+  attachmentNote?: string;
 }
 
 export interface FaultOrder {
@@ -64,6 +68,12 @@ export interface FaultOrder {
   repairRemark?: string;
   acceptanceResult?: AcceptanceResult;
   acceptanceRemark?: string;
+  approvalStatus?: ApprovalStatus;
+  approvalRemark?: string;
+  approver?: string;
+  approvalTime?: string;
+  lastFollowTime?: string;
+  latestQuoteAmount?: number;
 }
 
 export interface MaintenancePlan {
@@ -230,4 +240,11 @@ export const AcceptanceResultLabels: Record<AcceptanceResult, string> = {
   'passed': '验收通过',
   'failed': '验收未过',
   'pending': '待验收',
+};
+
+export const ApprovalStatusLabels: Record<ApprovalStatus, string> = {
+  'pending': '待审批',
+  'approved': '已通过',
+  'rejected': '已退回',
+  'none': '无需审批',
 };

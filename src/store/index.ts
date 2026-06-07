@@ -64,6 +64,8 @@ interface AppState {
   addMaintenancePlan: (plan: Omit<MaintenancePlan, 'id'>) => void;
   updateEquipment: (id: string, updates: Partial<Equipment>) => void;
   addTrackRecord: (faultId: string, record: Omit<ExternalTrackRecord, 'id'>) => void;
+  approveFaultOrder: (faultId: string, approver: string, remark?: string) => void;
+  rejectFaultOrder: (faultId: string, approver: string, remark: string) => void;
   getEquipmentById: (id: string) => Equipment | undefined;
   getEquipmentNameById: (id: string) => string;
 }
@@ -159,8 +161,38 @@ export const useAppStore = create<AppState>((set, get) => ({
         ...o,
         externalStatus: record.status,
         trackRecords: [...(o.trackRecords || []), newRecord],
+        lastFollowTime: record.time,
+        latestQuoteAmount: record.quoteAmount !== undefined ? record.quoteAmount : o.latestQuoteAmount,
       } as FaultOrder;
     }),
+  })),
+
+  approveFaultOrder: (faultId, approver, remark) => set((state) => ({
+    faultOrders: state.faultOrders.map((o) =>
+      o.id === faultId
+        ? {
+            ...o,
+            approvalStatus: 'approved',
+            approver,
+            approvalRemark: remark,
+            approvalTime: new Date().toISOString().slice(0, 16).replace('T', ' '),
+          }
+        : o
+    ),
+  })),
+
+  rejectFaultOrder: (faultId, approver, remark) => set((state) => ({
+    faultOrders: state.faultOrders.map((o) =>
+      o.id === faultId
+        ? {
+            ...o,
+            approvalStatus: 'rejected',
+            approver,
+            approvalRemark: remark,
+            approvalTime: new Date().toISOString().slice(0, 16).replace('T', ' '),
+          }
+        : o
+    ),
   })),
 
   getEquipmentById: (id) => get().equipments.find((e) => e.id === id),
