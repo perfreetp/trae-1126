@@ -13,6 +13,7 @@ import type {
   PerformanceData,
   SafetyCheckItem,
   ShiftType,
+  ExternalTrackRecord,
 } from '../types';
 import {
   equipments as initialEquipments,
@@ -61,6 +62,8 @@ interface AppState {
   addSparePartRequest: (request: Omit<SparePartRequest, 'id'>) => void;
   addEquipment: (equipment: Omit<Equipment, 'id'>) => void;
   addMaintenancePlan: (plan: Omit<MaintenancePlan, 'id'>) => void;
+  updateEquipment: (id: string, updates: Partial<Equipment>) => void;
+  addTrackRecord: (faultId: string, record: Omit<ExternalTrackRecord, 'id'>) => void;
   getEquipmentById: (id: string) => Equipment | undefined;
   getEquipmentNameById: (id: string) => string;
 }
@@ -140,6 +143,24 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   addMaintenancePlan: (plan) => set((state) => ({
     maintenancePlans: [...state.maintenancePlans, { ...plan, id: generateId() }],
+  })),
+
+  updateEquipment: (id, updates) => set((state) => ({
+    equipments: state.equipments.map((e) =>
+      e.id === id ? { ...e, ...updates } : e
+    ),
+  })),
+
+  addTrackRecord: (faultId, record) => set((state) => ({
+    faultOrders: state.faultOrders.map((o) => {
+      if (o.id !== faultId) return o;
+      const newRecord: ExternalTrackRecord = { ...record, id: generateId() };
+      return {
+        ...o,
+        externalStatus: record.status,
+        trackRecords: [...(o.trackRecords || []), newRecord],
+      } as FaultOrder;
+    }),
   })),
 
   getEquipmentById: (id) => get().equipments.find((e) => e.id === id),

@@ -2,12 +2,14 @@ export type EquipmentType = 'quay-crane' | 'yard-crane' | 'tractor' | 'conveyor'
 export type EquipmentStatus = 'running' | 'stopped' | 'maintenance';
 export type FaultLevel = 'normal' | 'serious' | 'urgent';
 export type FaultStatus = 'pending' | 'processing' | 'completed';
+export type ExternalTrackStatus = 'contacted' | 'arrived' | 'quoting' | 'repairing' | 'accepting' | 'completed';
 export type MaintenanceType = 'level1' | 'level2' | 'level3';
 export type MaintenanceStatus = 'pending' | 'in-progress' | 'completed';
 export type OilType = 'diesel' | 'engine' | 'hydraulic';
 export type FeedbackType = 'abnormal' | 'suggestion';
 export type FeedbackStatus = 'pending' | 'processing' | 'completed';
 export type ShiftType = 'day' | 'night';
+export type AcceptanceResult = 'passed' | 'failed' | 'pending';
 
 export interface Equipment {
   id: string;
@@ -32,6 +34,14 @@ export interface RunningRecord {
   driver: string;
 }
 
+export interface ExternalTrackRecord {
+  id: string;
+  status: ExternalTrackStatus;
+  remark: string;
+  operator: string;
+  time: string;
+}
+
 export interface FaultOrder {
   id: string;
   equipmentId: string;
@@ -47,6 +57,13 @@ export interface FaultOrder {
   cost?: number;
   accidentRelated?: string;
   externalVendor?: string;
+  externalContact?: string;
+  externalArrivalTime?: string;
+  externalStatus?: ExternalTrackStatus;
+  trackRecords?: ExternalTrackRecord[];
+  repairRemark?: string;
+  acceptanceResult?: AcceptanceResult;
+  acceptanceRemark?: string;
 }
 
 export interface MaintenancePlan {
@@ -198,4 +215,19 @@ export const OilTypeLabels: Record<OilType, string> = {
 export const ShiftTypeLabels: Record<ShiftType, string> = {
   'day': '白班',
   'night': '夜班',
+};
+
+export const ExternalTrackStatusLabels: Record<ExternalTrackStatus, string> = {
+  'contacted': '已联系',
+  'arrived': '已到场',
+  'quoting': '报价中',
+  'repairing': '维修中',
+  'accepting': '待验收',
+  'completed': '已完成',
+};
+
+export const AcceptanceResultLabels: Record<AcceptanceResult, string> = {
+  'passed': '验收通过',
+  'failed': '验收未过',
+  'pending': '待验收',
 };

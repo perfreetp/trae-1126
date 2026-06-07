@@ -24,7 +24,7 @@ import { StatCard } from '../components/StatCard';
 import { EquipmentTypeLabels, ShiftTypeLabels, type ShiftType } from '../types';
 
 export default function RunningHours() {
-  const { equipments, runningRecords, addRunningRecord, getEquipmentNameById } = useAppStore();
+  const { equipments, runningRecords, addRunningRecord, updateEquipment, getEquipmentById, getEquipmentNameById } = useAppStore();
   const [equipmentFilter, setEquipmentFilter] = useState('all');
   const [timeRange, setTimeRange] = useState<'day' | 'week' | 'month'>('week');
   const [showAddModal, setShowAddModal] = useState(false);
@@ -39,14 +39,21 @@ export default function RunningHours() {
 
   const handleSubmit = () => {
     if (!newRecord.equipmentId || !newRecord.driver || !newRecord.hours || !newRecord.volume) return;
+    const hours = parseFloat(newRecord.hours);
     addRunningRecord({
       equipmentId: newRecord.equipmentId,
       date: newRecord.date,
       shift: newRecord.shift,
       driver: newRecord.driver,
-      hours: parseFloat(newRecord.hours),
+      hours: hours,
       volume: parseInt(newRecord.volume),
     });
+    const equipment = getEquipmentById(newRecord.equipmentId);
+    if (equipment) {
+      updateEquipment(newRecord.equipmentId, {
+        totalHours: equipment.totalHours + hours,
+      });
+    }
     setShowAddModal(false);
     setNewRecord({
       equipmentId: '',
